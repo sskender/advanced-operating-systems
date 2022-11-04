@@ -24,20 +24,20 @@
  *
  */
 
-// mtype paper request 0
-// mtype paper response 3
-#define PAPER 0
+// mtype paper request 1
+// mtype paper response 4
+#define PAPER 1
 
-// mtype tobacco request 1
-// mtype tobacco response 4
-#define TOBACCO 1
+// mtype tobacco request 2
+// mtype tobacco response 5
+#define TOBACCO 2
 
-// mtype matches request 2
-// mtype matches response 5
-#define MATCHES 2
+// mtype matches request 3
+// mtype matches response 6
+#define MATCHES 3
 
 // mtype smoker received response
-#define SUCCESS 42
+#define SUCCESS 7
 
 
 /**
@@ -77,32 +77,45 @@ void _send_message(int *msqid, long mtype, char *mtext) {
 void _receive_message(int *msqid, long mtype) {
     // receive message from queue helper function
     struct msgbuf buf;
+    int mlen = sizeof(buf) - sizeof(long);
     int flag = 0; // block when queue is empty
 
-    if (msgrcv(*msqid, (struct msgbuf *)&buf, sizeof(buf)-sizeof(long), mtype, flag) == -1) {
+    if (msgrcv(*msqid, (struct msgbuf *)&buf, mlen, mtype, flag) == -1) {
         perror("msgrcv");
-        exit(1);
     }
 
     printf("[msg <--] %s\n", buf.mtext);
 }
 
+char *ingredient_to_str(int mtype) {
+    char *ingredient;
+
+    switch (mtype) {
+        case PAPER:
+            ingredient = "paper";
+            break;
+        case TOBACCO:
+            ingredient = "tobacco";
+            break;
+        case MATCHES:
+            ingredient = "matches";
+            break;
+    }
+
+    return ingredient;
+}
+
 
 int reload_table() {
-    // agent  takes two random items
-    // and puts them on the table for smoker processes
-    // function returns the only item that is not on the table
+    // agent  takes two random ingredients
+    // and puts them on the table for smokers
+    // function returns the only ingredient that is not on the table
+    // smoker who has that one item will be chosen from the queue
+    int missing_ingredient = rand() % 3 + 1;
 
-    // TODO remove
-    /* return 1; */
-    // TODO 
-    // smoker who needs that item will be chosen from the queue
-    // missing item type matches the smoker request as mtype in buffer
-    int missing_item = rand() % 3;
+    printf("Agent is putting new items on the table...\n");
 
-    printf("Agent is putting new items on the table ...\n");
-
-    switch (missing_item) {
+    switch (missing_ingredient) {
         case PAPER:
             printf("Agent put tobacco and matches on the table\n");
             break;
@@ -114,25 +127,22 @@ int reload_table() {
             break;
     }
 
-    // return the only item not on the table
-    return missing_item;
+    printf("Missing ingredient is %s\n", ingredient_to_str(missing_ingredient));
+
+    // return the only ingredient that is not on the table
+    return missing_ingredient;
 }
 
-void accept_smoker_request(int *msqid, long mtype) {
+void accept_smoker_request(int *msqid, int mtype) {
     // accept smoker request from the queue
-    // accept the first smoker whose request matches
-    // currently available items on the table
+    // accept the first smoker whose request matches the missing ingredient
     // reads message from the queue
-    
-    // TODO wrapper for string
-    printf("Accepting smoker request for %ld\n", mtype);
-
-    _receive_message(msqid, mtype);
-
-    printf("Message received from smoker successfully\n");
+    printf("Accepting smoker request for %s\n", ingredient_to_str(mtype));
+    _receive_message(msqid, (long)mtype);
+    printf("Request for %s received from smoker successfully\n", ingredient_to_str(mtype));
 }
 
-void supply_smoker(int *msqid, long mtype) {
+void supply_smoker(int *msqid, int mtype) {
     // send available items to smoker
     // sends response to the queue
     char *mtext;
@@ -154,25 +164,25 @@ void supply_smoker(int *msqid, long mtype) {
             break;
     }
 
-    _send_message(msqid, mtype+3, mtext);
+    _send_message(msqid, (long)mtype+3, mtext);
 
     printf("Agent sent items to smoker\n");
 }
 
-void acknowledge_smoker_response(int *msqid) {
+void acknowledge_end(int *msqid) {
     // reads message from the queue
-    int mtype = SUCCESS;
+    long mtype = SUCCESS;
 
-    printf("Waiting for smoker to receive items\n");
+    printf("Waiting for smoker to receive items...\n");
     _receive_message(msqid, mtype);
-    printf("Smoker is served successfully\n");
+    printf("Smoker is served successfully. All done!\n\n\n");
 }
 
 int main(void) {
     int msqid;
     int msqkey;
 
-    int missing_item;
+    int missing_ingredient;
 
     srand((unsigned int)time(NULL));
 
@@ -184,18 +194,17 @@ int main(void) {
         perror("msgget");
         exit(1);
     }
-
     printf("msqid: %d\n", msqid);
 
-    // TODO here
+    // run agent server
     while (1) {
-        missing_item = reload_table();
-        printf("missing item is %d\n", missing_item);
-
-        accept_smoker_request(&msqid, missing_item);
-        supply_smoker(&msqid, missing_item);
-        acknowledge_smoker_response(&msqid);
+        missing_ingredient = reload_table();
+        accept_smoker_request(&msqid, missing_ingredient);
+        supply_smoker(&msqid, missing_ingredient);
+        acknowledge_end(&msqid);
     }
+
+    // TODO destroy queue
 
     return 0;
 }
