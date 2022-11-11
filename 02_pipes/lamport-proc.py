@@ -26,16 +26,19 @@ class Message:
     REQ = 1
     ACK = 2
     END = 3
-    def __init__(self, msg_type, pi, clock):
+    def __init__(self, msg_type, sender_pi, sender_clock, recipient_pi=None):
         self.msg_type = msg_type
-        self.pi = pi
-        self.clock = clock
+        self.sender_pi = sender_pi
+        self.sender_clock = sender_clock
+        self.recipient_pi = recipient_pi
     def is_req(self):
         return self.msg_type == Message.REQ
-    def is_ack(self):
-        return self.msg_type == Message.ACK
+    def is_ack(self, pi=None):
+        return self.msg_type == Message.ACK and self.recipient_pi == pi
     def is_end(self):
         return self.msg_type == Message.END
+    def is_for_me(self, pi):
+        return self.recipient_pi == pi
     def _get_msg_type(self):
         if self.msg_type == Message.REQ:
             return "REQ"
@@ -44,30 +47,36 @@ class Message:
         if self.msg_type == Message.END:
             return "END"
     def __lt__(self, other):
-        if self.clock < other.clock:
+        if self.sender_clock < other.sender_clock:
             return True
-        if self.clock > other.clock:
+        if self.sender_clock > other.sender_clock:
             return False
-        if self.clock == other.clock:
-            return self.pi < other.pi
+        if self.sender_clock == other.sender_clock:
+            return self.sender_pi < other.sender_pi
     def __repr__(self):
         return self.__str__()
     def __str__(self):
-        return f"<{self._get_msg_type()} ({self.pi}, {self.clock})>"
- #sadrži identifikator procesa, vrijednost logičkog sata procesa te broj ulazaka u kritički odsječak procesa. 
+        return f"{self._get_msg_type()}({self.sender_pi}, {self.sender_clock})"
+
 
 
 class RequestQueue:
-    def __init__(self):
+    def __init__(self, pi):
+        self.pi = pi
         self.queue = []
-    def add(self, req):
-        self.queue.append(req)
-        self.queue.sort()
+    def add(self, req: Message):
+        if req.is_req():
+            self.queue.append(req)
+            self.queue.sort()
     def size(self):
         return len(self.queue)
     def remove(self, req):
         # TODO implement
         pass
+    def is_my_request_first(self):
+        if self.size() > 0:
+            return self.queue[0].sender_pi == self.pi
+        return False
     def __repr__(self):
         return self.__str__()
     def __str__(self):
@@ -85,12 +94,21 @@ def send_request(pi, pipe):
     pipe.send(f"pi {pi} hoce u KO")
 
 
+# TODO depricated
 def broadcast_request(pi, clock, pipes):
     logger = logging.getLogger()
     logger.setLevel(logging.DEBUG)
     msg = Message(Message.REQ, pi, clock)
     for pipe in pipes:
-        logger.debug(f"pi {pi} is sending a message {msg} to pipe")
+        logger.debug(f"pi {pi} is sending a message to pipe: {msg}")
+        pipe.send(msg)
+
+# TODO rename this to just send???
+def broadcast_message(pi, pipes, msg):
+    logger = logging.getLogger()
+    logger.setLevel(logging.DEBUG)
+    for pipe in pipes:
+        logger.debug(f"pi {pi} is sending a message to pipe: {msg}")
         pipe.send(msg)
 
 
@@ -98,9 +116,9 @@ def read_message(pi, pipe) -> Message:
     logger = logging.getLogger()
     logger.setLevel(logging.DEBUG)
     # TODO
-    logger.debug(f"pi {pi} is reading a message from pipe")
+    #logger.debug(f"pi {pi} is reading a message from pipe")
     msg = pipe.recv()
-    logger.info(f"pi {pi} got message from pipe: < {msg} >")
+    #logger.info(f"pi {pi} got message from pipe: < {msg} >")
     return msg
 
 
@@ -130,24 +148,106 @@ def run_worker(pi, pipes_read, pipes_write):
     # TODO param send array and recv array and loop while 1
     logger = logging.getLogger()
     logger.setLevel(logging.DEBUG)
-    logging.debug(f"Starting process {pi}")
+    logging.info(f"Starting process {pi}")
+    time.sleep(1)
 
-    requests_queue = RequestQueue()
+    requests_queue = RequestQueue(pi)
     clock = 0
     ko_count = 0
     ko_count_break_point = 5
+    ack_required = len(pipes_write)
+    ack_received = 0
 
     while True:
-        # send request
+        # if not done send a new request
         if ko_count < ko_count_break_point:
-            broadcast_request(pi, clock, pipes_write)
+            # craft request message
+            msg = Message(Message.REQ, pi, clock)
+            # broadcast request
+            broadcast_message(pi, pipes_write, msg)
+            # add my request to queue
+            requests_queue.add(msg)
+            logger.info(f"pi {pi} message queue updated: {requests_queue}")
 
-        # read response
+        # just for sanity
+        time.sleep(1)
+
+        # wait for everyone to send ack for req -> can't go to K.O. before that
+        # TODO request is not the first in the queue
+        #while ack_received < ack_required or: # and not requests_queue.is_my_request_first():
+        while True:
+            # process all incoming messages from all pipes
+            for msg in get_messages(pi, pipes_read):
+                #logger.debug(f"pi {pi} just got message {msg}")
+
+                # just a new request from somebody
+                if msg.is_req():
+                    # update clock
+                    clock = max(clock, msg.sender_clock) + 1
+                    logger.debug(f"pi {pi} clock updated: {clock}")
+                    # save request to queueu
+                    requests_queue.add(msg)
+                    logger.info(f"pi {pi} message queue updated: {requests_queue}")
+                    # send response ack
+                    msg = Message(Message.ACK, pi, clock, msg.sender_pi)
+                    broadcast_message(pi, pipes_write, msg)
+
+                # recevied ack for my request
+                if msg.is_ack(pi):
+                    ack_received += 1
+                    clock = max(clock,  msg.sender_clock) + 1
+                    logger.debug(f"pi {pi} clock updated: {clock}")
+
+            # check if I can go to K.O. now
+            if ack_received == ack_required \
+                and requests_queue.is_my_request_first():
+                logger.debug(f"pi {pi} can go to K.O. because queue = {requests_queue} and ack recv = {ack_received} / {ack_required}")
+                break  # break polling loop
+
+            # TODO any else breaking points
+
+        if ko_count < ko_count_break_point:
+            logger.debug(f"pi {pi} just received all acks: clock = {clock} queue = {requests_queue} and entering KO")
+            ko_count += 1
+            ack_received = 0
+            run_database_job(pi, clock, ko_count)
+
+        #
+
+
+
+
+
+        # TODO go to KO
+
+        #logger.debug(f"pi {pi} just received all acks: clock = {clock} queue = {requests_queue}")
+        #time.sleep(1)
+        #break
+
+        # TODO INCREASE CLOCK UPON RECEIVEING ANY MESSAGE
+
+
+        # TODO check if can go to KO
+
+
+        # TODO nemoj slati jos dok ne dobije sve odgovore
+
+
+
+
+
+            #broadcast_request(pi, clock, pipes_write)
+            # TODO add your message to quueue
+
+        # read responses from everyone
+        """
+        time.sleep(0.5)
         for msg in get_messages(pi, pipes_read):
             logger.debug(f"msg in pi {pi} => {msg}")
             if msg.is_req():
                 requests_queue.add(msg)
-                logger.debug(f"queue: {requests_queue}")
+                logger.debug(f"queue {pi}: {requests_queue}")
+        """
              
              # TODO process response
              # 1 - new req
@@ -158,8 +258,9 @@ def run_worker(pi, pipes_read, pipes_write):
         #for pipe in pipes_read:
         #    read_message(pi, pipe)
 
-        if random.randint(0, 3) == 0:
-            break
+        #break
+        #if random.randint(0, 3) == 0:
+        #    break
 
         # read everyting
 
@@ -192,8 +293,8 @@ def run_worker(pi, pipes_read, pipes_write):
 #         logger.info(f"{pi} received opet: {msg}")
 
 
-    time.sleep(2)
-    return
+    #time.sleep(2)
+    #return
 
 
 def get_pipes_read(pipes, pi):
