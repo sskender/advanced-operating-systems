@@ -10,26 +10,7 @@ NUM_PIPES = 6
 NUM_WORKERS = 3
 
 
-class Database:
-    def __init__(self):
-        self.storage = []
-    def add(self, item):
-        self.storage.append(item)
-    def update(self, pi, clock, ko_count):
-        idx = pi - 1
-        self.storage[idx].clock = clock
-        self.storage[idx].ko_count = ko_count
-        print(self.storage[idx])
-    def __repr__(self):
-        return self.__str__()
-    def __str__(self):
-        return f"{str(self.storage)}"
-
-class CustomManager(BaseManager):
-    pass
-
-
-class DbEntry:
+class Entry:
     def __init__(self, pi, clock, ko_count):
         self.pi = pi
         self.clock = clock
@@ -37,7 +18,24 @@ class DbEntry:
     def __repr__(self):
         return self.__str__()
     def __str__(self):
-        return f"[ PI: {self.pi} CLOCK: {self.clock} KO_COUNT: {self.ko_count} ]"
+        return f"(PI: {self.pi}; CLOCK: {self.clock}; KO_COUNT: {self.ko_count})"
+
+
+class Database:
+    def __init__(self):
+        self.storage = []
+    def add(self, item: Entry):
+        self.storage.append(item)
+    def update(self, pi, clock, ko_count):
+        idx = pi - 1
+        if idx >= len(self.storage):
+            return
+        self.storage[idx].clock = clock
+        self.storage[idx].ko_count = ko_count
+    def __repr__(self):
+        return self.__str__()
+    def __str__(self):
+        return f"{str(self.storage)}"
 
 
 class Message:
@@ -55,8 +53,6 @@ class Message:
         return self.msg_type == Message.ACK and self.recipient_pi == pi
     def is_end(self):
         return self.msg_type == Message.END
-    def is_for_me(self, pi):
-        return self.recipient_pi == pi
     def _get_msg_type(self):
         if self.msg_type == Message.REQ:
             return "REQ"
@@ -83,10 +79,8 @@ class Message:
         return f"{self._get_msg_type()}({self.sender_pi}, {self.sender_clock})"
 
 
-
 class RequestQueue:
-    def __init__(self, pi):
-        self.pi = pi
+    def __init__(self):
         self.queue = []
     def add(self, req: Message):
         if req.is_req():
@@ -95,28 +89,29 @@ class RequestQueue:
     def size(self):
         return len(self.queue)
     def remove(self, req: Message):
-        req.msg_type = Message.REQ  # override for quueue
+        # override msg type for __eq__ method
+        req.msg_type = Message.REQ
         self.queue.remove(req)
     def get_first(self):
         if self.size() > 0:
             return self.queue[0]
         return None
-    def is_my_request_first(self):
-        f = self.get_first()
-        if f is None:
+    def is_pi_request_first(self, pi):
+        first = self.get_first()
+        if first is None:
             return False
-        return f.sender_pi == self.pi
-        #if self.size() > 0:
-        #    return self.queue[0].sender_pi == self.pi
-        #return False
+        return first.sender_pi == pi
     def __repr__(self):
         return self.__str__()
     def __str__(self):
         return str(self.queue)
 
 
+class CustomManager(BaseManager):
+    pass
 
 
+"""
 # TODO remove
 def send_request(pi, pipe):
     logger = logging.getLogger()
@@ -134,16 +129,12 @@ def broadcast_request(pi, clock, pipes):
     for pipe in pipes:
         logger.debug(f"pi {pi} is sending a message to pipe: {msg}")
         pipe.send(msg)
-
-# TODO rename this to just send???
-def broadcast_message(pi, pipes, msg):
-    logger = logging.getLogger()
-    logger.setLevel(logging.DEBUG)
-    for pipe in pipes:
-        logger.debug(f"pi {pi} is sending a message to pipe: {msg}")
-        pipe.send(msg)
+"""
 
 
+
+
+"""
 def read_message(pi, pipe) -> Message:
     logger = logging.getLogger()
     logger.setLevel(logging.DEBUG)
@@ -152,46 +143,55 @@ def read_message(pi, pipe) -> Message:
     msg = pipe.recv()
     #logger.info(f"pi {pi} got message from pipe: < {msg} >")
     return msg
+"""
 
 
-
-def run_database_job(db: Database, pi, clock, ko_count):
-    # TODO locking shared database ???
+def database_job(db: Database, pi: int, clock: int, ko_count: int):
+    """ K.O. job """
     logger = logging.getLogger()
     logger.setLevel(logging.DEBUG)
 
-    logging.info(f"Pi {pi} is starting a database job")
-    idx = pi - 1
-    print(db)
+    logging.debug(f"PI {pi} is starting a database job")
     db.update(pi, clock, ko_count)
-    #DATABASE[idx].clock = clock
-    #DATABASE[idx].ko_count = ko_count
-    logging.info(f"pi {pi} updated database: {db}")
+    logging.info(f"PI {pi} updated database: {str(db)}")
     r = random.randint(100, 2000) / 1000
     time.sleep(r)
-    logging.info(f"Pi {pi} finished database job")
-
-def get_messages(pi, pipes):
-    # TODO not sure if this is good
-    for pipe in pipes:
-        if pipe.poll():
-            yield read_message(pi, pipe)
+    logging.debug(f"PI {pi} finished database job")
 
 
-def run_worker(db, pi, pipes_read, pipes_write):
-    # TODO param send array and recv array and loop while 1
+def push_messages(pi: int, pipes: list, msg: Message):
     logger = logging.getLogger()
     logger.setLevel(logging.DEBUG)
-    logging.info(f"Starting process {pi}")
-    #logging.info(f"pi {pi} updated database: {db[:]}")
-    #print(db)
-    time.sleep(1)
-    #return
 
-    requests_queue = RequestQueue(pi)
+    logger.info(f"PI {pi} sent a message {msg}")
+    for pipe in pipes:
+        pipe.send(msg)
+
+
+def get_messages(pi: int, pipes: list) -> Message:
+    logger = logging.getLogger()
+    logger.setLevel(logging.DEBUG)
+
+    for pipe in pipes:
+        if pipe.poll():
+            msg = pipe.recv()
+            if msg.recipient_pi is None \
+                or msg.recipient_pi == pi:
+                logging.info(f"PI {pi} recieved message {msg}")
+                yield msg
+
+
+def worker(db, pi, pipes_read, pipes_write):
+    logger = logging.getLogger()
+    logger.setLevel(logging.DEBUG)
+
+    logging.info(f"Starting process {pi}")
+    time.sleep(1)
+
+    requests_queue = RequestQueue()
     clock = 0
     ko_count = 0
-    ko_count_break_point = 2
+    ko_count_break_point = 2 # TODO set to 5
     ack_required = len(pipes_write)
     ack_received = 0
 
@@ -200,73 +200,93 @@ def run_worker(db, pi, pipes_read, pipes_write):
         if ko_count < ko_count_break_point:
             # craft request message
             msg = Message(Message.REQ, pi, clock)
-            # broadcast request
-            broadcast_message(pi, pipes_write, msg)
             # add my request to queue
             requests_queue.add(msg)
-            logger.info(f"pi {pi} message queue updated: {requests_queue}")
+            logger.info(f"PI {pi} updated message queue: {requests_queue}")
+            # broadcast request
+            push_messages(pi, pipes_write, msg)
 
         # just for sanity
         time.sleep(1)
 
-        # wait for everyone to send ack for req -> can't go to K.O. before that
-        # TODO request is not the first in the queue
-        #while ack_received < ack_required or: # and not requests_queue.is_my_request_first():
+        # reading and waiting for responses
         while True:
             # process all incoming messages from all pipes
             for msg in get_messages(pi, pipes_read):
-                #logger.debug(f"pi {pi} just got message {msg}")
 
-                # just a new request from somebody
+                # a new request from somebody
                 if msg.is_req():
                     # update clock
                     clock = max(clock, msg.sender_clock) + 1
-                    logger.debug(f"pi {pi} clock updated: {clock}")
+                    logger.debug(f"PI {pi} updated clock: {clock}")
                     # save request to queueu
                     requests_queue.add(msg)
-                    logger.info(f"pi {pi} message queue updated: {requests_queue}")
+                    logger.info(f"PI {pi} updated message queue: {requests_queue}")
                     # send response ack
                     msg = Message(Message.ACK, pi, clock, msg.sender_pi)
-                    broadcast_message(pi, pipes_write, msg)
+                    push_messages(pi, pipes_write, msg)
 
                 # recevied ack for my request
                 if msg.is_ack(pi):
                     ack_received += 1
-                    clock = max(clock,  msg.sender_clock) + 1
-                    logger.debug(f"pi {pi} clock updated: {clock}")
+                    # update clock
+                    clock = max(clock, msg.sender_clock) + 1
+                    logger.debug(f"PI {pi} updated clock: {clock}")
 
-                # received end messga for someone's exit from K.O.
+                # received end message for someones exit from K.O.
                 if msg.is_end():
-                    clock = max(clock,  msg.sender_clock) + 1
-                    logger.debug(f"pi {pi} clock updated: {clock}")
-                    logger.warn(f"pi {pi} queue before remove {requests_queue} to remove {msg}")
+                    # update clock
+                    clock = max(clock, msg.sender_clock) + 1
+                    logger.debug(f"PI {pi} updated clock: {clock}")
+                    # remove original request from queue
+                    logger.debug(f"PI {pi} message queue: {requests_queue}")
                     requests_queue.remove(msg)
-                    logger.warn(f"pi {pi} queue after remove {requests_queue}")
-                    # TODO implement
+                    logger.debug(f"PI {pi} updated message queue: {requests_queue}")
 
-            # check if I can go to K.O. now
+            # check if process can go to K.O. now
+            # check if process got all responses
+            # check if process request is the first in queue
             if ack_received == ack_required \
-                and requests_queue.is_my_request_first():
-                logger.debug(f"pi {pi} can go to K.O. because queue = {requests_queue} and ack recv = {ack_received} / {ack_required}")
-                break  # break polling loop
+                and requests_queue.is_pi_request_first(pi):
+                break
+
+
+
+                # TODO remove
+                #logger.debug(f"PI {pi} can go to K.O. because queue = {requests_queue} and ack recv = {ack_received} / {ack_required}")
+                #break
+            
+            
+            
+            
+              # break polling loop
 
             # TODO any else breaking points
 
         if ko_count < ko_count_break_point:
-            logger.debug(f"pi {pi} just received all acks: clock = {clock} queue = {requests_queue} and entering KO")
+            logger.debug(f"PI {pi} received all ACKs and is entering K.O.: clock = {clock} queue = {requests_queue}")
             
+            # remove request from queue
             my_req = requests_queue.get_first()
             assert(my_req is not None)
             assert(my_req.sender_pi == pi)
-
-            ko_count += 1
+            logger.debug(f"PI {pi} message queue: {requests_queue}")
+            requests_queue.remove(my_req)
+            logger.debug(f"PI {pi} updated message queue: {requests_queue}")
             ack_received = 0
 
-            # do job
-            run_database_job(db, pi, clock, ko_count)
+            # do database job
+            ko_count += 1
+            database_job(db, pi, clock, ko_count)
+
+            # notify others job is done
+            # send clock from original request not the current clock
+            msg = Message(Message.END, pi, my_req.sender_clock)
+            push_messages(pi, pipes_write, msg)
 
 
 
+            """
             # TODO remove request from local
             logger.warn(f"pi {pi} queue before remove {requests_queue}")
             requests_queue.remove(my_req)
@@ -277,7 +297,8 @@ def run_worker(db, pi, pipes_read, pipes_write):
             # notify everyone upon exit
             msg = Message(Message.END, my_req.sender_pi, my_req.sender_clock)
             logger.debug(f"pi {pi} is sending END msg {msg}")
-            broadcast_message(pi, pipes_write, msg)
+            push_messages(pi, pipes_write, msg)
+            """
 
         #
 
@@ -344,24 +365,7 @@ def run_worker(db, pi, pipes_read, pipes_write):
     # for pipe in pipes_read:
     #     read_message(pi, pipe)
 
-#     if pi == 1:
-#         pipes[0][1].send(f"{pi} says hello")
-#         pipes[5][1].send(f"{pi} says kurac")
-#         logging.debug("sent succs")
-#     if pi == 2:
-#         msg = pipes[0][0].recv()
-#         logger.info(f"{pi} received: {msg}")
-#         # also send
-#         pipes[2][1].send(f"{pi} says jebi si mater")
-#     if pi == 3:
-#         msg = pipes[5][0].recv()
-#         logger.info(f"{pi} received: {msg}")
-#         msg = pipes[2][0].recv()
-#         logger.info(f"{pi} received opet: {msg}")
 
-
-    #time.sleep(2)
-    #return
 
 
 def get_pipes_read(pipes, pi):
@@ -383,68 +387,47 @@ def get_pipes_write(pipes, pi):
     if pi == 3:
         return [pipes[3][1], pipes[4][1]]
 
+"""
 # TODO remove unused
 def init_database():
     for i in range(NUM_WORKERS):
         pi = i + 1
-        entry = DbEntry(pi, 0, 0)
+        entry = Entry(pi, 0, 0)
         DATABASE.append(entry)
     logging.info(DATABASE)
+"""
+
 
 def main():
+    logging.info('Starting main')
+
+    # create shared database in memory
     CustomManager.register('Database', Database)
-    #manager = CustomManager()
-    #db = manager.Database()
-    #db = Array(Message, NUM_WORKERS)
-    logging.debug('Starting main')
 
     with CustomManager() as manager:
         db = manager.Database()
-        print(db)
-
-        for i in range(NUM_WORKERS):
-            pi = i + 1
-            entry = DbEntry(pi, 0, 0)
-            db.add(entry)
-            #db[i] = entry
-        logging.info(db)
-        
-        #return
-
-
-        #return
-        #print(db)
-        pipes = []
-        
 
         # init database
-        #init_database()
-        #for i in range(NUM_WORKERS):
-        #    pi = i + 1
-        #    entry = DbEntry(pi, 0, 0)
-        #    db[i] = entry
-        #logging.info(db[:])
+        for i in range(NUM_WORKERS):
+            pi = i + 1
+            entry = Entry(pi, 0, 0)
+            db.add(entry)
+        logging.debug(f"database: {str(db)}")
 
-        #return
-
-        # create pipes
+        # init pipes
         # TODO formula
+        pipes = []
         for _ in range(NUM_PIPES):
             r, w = Pipe()
             pipes.append((r, w))
-        logging.debug(f"pipes: {pipes}")
 
-        #  sadrži identifikator procesa, vrijednost logičkog sata procesa te broj ulazaka u kritički odsječak procesa. 
-
-
-        # create processes
+        # init processes
         procs = []
         for i in range(NUM_WORKERS):
             pi = i + 1
             pipes_read = get_pipes_read(pipes, pi)
             pipes_write = get_pipes_write(pipes, pi)
-            proc = Process(target=run_worker, args=(db, pi, pipes_read, pipes_write, ))
-            logging.debug(f"proc: {proc} pi: {pi} pipes_read: {pipes_read} pipes_write: {pipes_write}")
+            proc = Process(target=worker, args=(db, pi, pipes_read, pipes_write, ))
             procs.append(proc)
             proc.start()
 
