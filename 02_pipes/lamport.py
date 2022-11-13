@@ -183,6 +183,7 @@ def get_messages(pi: int, pipes: list) -> Message:
 
 def worker(db, pi, pipes_read, pipes_write):
     logging.info(f"Starting process {pi}")
+    time.sleep(1)
 
     requests_queue = RequestQueue()
     clock = 0
