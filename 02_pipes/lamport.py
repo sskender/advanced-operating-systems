@@ -1,12 +1,15 @@
 import logging
-import time
+import math
 import random
+import time
 from multiprocessing import Process, Pipe
 from multiprocessing.managers import BaseManager
 
-
-NUM_PIPES = 6
 NUM_WORKERS = 3
+LOGGING_LEVEL = logging.DEBUG
+
+logger = logging.getLogger()
+logger.setLevel(LOGGING_LEVEL)
 
 
 class Entry:
@@ -21,7 +24,7 @@ class Entry:
         return self.__str__()
 
     def __str__(self):
-        return f"(PI: {self.pi}; CLOCK: {self.clock}; KO_COUNT: {self.ko_count})"
+        return f"(PI: {self.pi}; CLOCK: {self.clock}; KO: {self.ko_count})"
 
 
 class Database:
@@ -46,7 +49,7 @@ class Database:
         return self.__str__()
 
     def __str__(self):
-        return f"{str(self.storage)}"
+        return str(self.storage)
 
 
 class Message:
@@ -154,9 +157,6 @@ class CustomManager(BaseManager):
 
 def database_job(db: Database, pi: int, clock: int, ko_count: int):
     """ K.O. job """
-    logger = logging.getLogger()
-    logger.setLevel(logging.DEBUG)
-
     logging.debug(f"PI {pi} started a database job")
     db.update(pi, clock, ko_count)
     logging.info(f"PI {pi} updated database: {str(db)}")
@@ -166,18 +166,12 @@ def database_job(db: Database, pi: int, clock: int, ko_count: int):
 
 
 def push_messages(pi: int, pipes: list, msg: Message):
-    logger = logging.getLogger()
-    logger.setLevel(logging.DEBUG)
-
-    logger.info(f"PI {pi} sent a message {msg}")
+    logging.info(f"PI {pi} sent a message {msg}")
     for pipe in pipes:
         pipe.send(msg)
 
 
 def get_messages(pi: int, pipes: list) -> Message:
-    logger = logging.getLogger()
-    logger.setLevel(logging.DEBUG)
-
     for pipe in pipes:
         if pipe.poll():
             msg = pipe.recv()
@@ -188,16 +182,12 @@ def get_messages(pi: int, pipes: list) -> Message:
 
 
 def worker(db, pi, pipes_read, pipes_write):
-    logger = logging.getLogger()
-    logger.setLevel(logging.DEBUG)
-
     logging.info(f"Starting process {pi}")
-    time.sleep(1)
 
     requests_queue = RequestQueue()
     clock = 0
     ko_count = 0
-    ko_count_break_point = 2  # TODO set to 5
+    ko_count_break_point = 5
     ack_required = len(pipes_write)
     ack_received = 0
 
@@ -208,13 +198,10 @@ def worker(db, pi, pipes_read, pipes_write):
             msg = Message(Message.REQ, pi, clock)
             # add my request to queue
             requests_queue.add(msg)
-            logger.debug(
+            logging.debug(
                 f"PI {pi} updated message queue: {requests_queue} clock: {clock}")
             # broadcast request
             push_messages(pi, pipes_write, msg)
-
-        # just for sanity
-        time.sleep(1)
 
         # reading and waiting for responses
         while True:
@@ -227,7 +214,7 @@ def worker(db, pi, pipes_read, pipes_write):
                     clock = max(clock, msg.sender_clock) + 1
                     # save request to queueu
                     requests_queue.add(msg)
-                    logger.debug(
+                    logging.debug(
                         f"PI {pi} updated message queue: {requests_queue} clock: {clock}")
                     # send response ack
                     msg = Message(Message.ACK, pi, clock, msg.sender_pi)
@@ -245,7 +232,7 @@ def worker(db, pi, pipes_read, pipes_write):
                     clock = max(clock, msg.sender_clock) + 1
                     # remove original request from queue
                     requests_queue.remove(msg)
-                    logger.debug(
+                    logging.debug(
                         f"PI {pi} updated message queue: {requests_queue} clock: {clock}")
 
             # check if process can go to K.O. now
@@ -256,7 +243,7 @@ def worker(db, pi, pipes_read, pipes_write):
                 break
 
         if ko_count < ko_count_break_point:
-            logger.debug(
+            logging.debug(
                 f"PI {pi} received all ACKs and is entering K.O.: clock = {clock} queue = {requests_queue}")
 
             # remove request from queue
@@ -264,7 +251,7 @@ def worker(db, pi, pipes_read, pipes_write):
             assert my_req is not None
             assert my_req.sender_pi == pi
             requests_queue.remove(my_req)
-            logger.debug(
+            logging.debug(
                 f"PI {pi} updated message queue: {requests_queue} clock: {clock}")
             ack_received = 0
 
@@ -278,24 +265,10 @@ def worker(db, pi, pipes_read, pipes_write):
             push_messages(pi, pipes_write, msg)
 
 
-def get_pipes_read(pipes, pi):
-    # TODO smart formula
-    if pi == 1:
-        return [pipes[1][0], pipes[4][0]]
-    if pi == 2:
-        return [pipes[0][0], pipes[3][0]]
-    if pi == 3:
-        return [pipes[2][0], pipes[5][0]]
-
-
-def get_pipes_write(pipes, pi):
-    # TODO smart formula
-    if pi == 1:
-        return [pipes[0][1], pipes[5][1]]
-    if pi == 2:
-        return [pipes[1][1], pipes[2][1]]
-    if pi == 3:
-        return [pipes[3][1], pipes[4][1]]
+def get_pipes_num(nproc):
+    npipes = math.comb(nproc, 2) * 2
+    logging.debug(f"For {nproc} processes {npipes} pipes is required")
+    return npipes
 
 
 def main():
@@ -313,21 +286,36 @@ def main():
             pi = i + 1
             entry = Entry(pi, 0, 0)
             db.add(entry)
-        logging.debug(f"database: {str(db)}")
+        logging.info(f"database: {str(db)}")
 
         # init pipes
-        # TODO formula
         pipes = []
-        for _ in range(NUM_PIPES):
+        for _ in range(get_pipes_num(NUM_WORKERS)):
             r, w = Pipe()
             pipes.append((r, w))
+        n = NUM_WORKERS
+        pi_read = {}
+        pi_write = {}
+        for pi in range(NUM_WORKERS):
+            pi_read[pi] = []
+            pi_write[pi] = []
+        for pi in range(NUM_WORKERS):
+            chunk = pipes[(pi*(n-1)):(pi*(n-1)+(n-1))]
+            pi_write[pi].extend([w[1] for w in chunk])
+            chunk_k = 0
+            for pj in range(NUM_WORKERS):
+                if pi != pj:
+                    pi_read[pj].append(chunk[chunk_k][0])
+                    chunk_k += 1
 
         # init processes
         procs = []
         for i in range(NUM_WORKERS):
+            pipes_read = pi_read[i]
+            pipes_write = pi_write[i]
+            assert len(pipes_read) == NUM_WORKERS - 1
+            assert len(pipes_write) == NUM_WORKERS - 1
             pi = i + 1
-            pipes_read = get_pipes_read(pipes, pi)
-            pipes_write = get_pipes_write(pipes, pi)
             proc = Process(target=worker, args=(
                 db, pi, pipes_read, pipes_write, ))
             procs.append(proc)
@@ -338,5 +326,4 @@ def main():
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.DEBUG)
     main()
