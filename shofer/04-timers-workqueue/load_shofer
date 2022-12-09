@@ -1,0 +1,24 @@
+#!/bin/sh
+module="shofer"
+device="shofer"
+mode="666"
+
+/sbin/insmod ./$module.ko $* || exit 1
+
+major=$(awk "\$2==\"$module\" {print \$1}" /proc/devices)
+
+eval $* #set arguments into environment variables
+if [ -z "$driver_num" ]; then
+	#argument driver_num=x not provided; use default value from config.h
+	driver_num=`grep -m 1 DRIVER_NUM < config.h | cut -f2`
+fi
+
+driver_num=$((driver_num-1))
+
+for i in `seq 0 $driver_num`
+do
+	rm -f /dev/${device}$i
+	mknod /dev/${device}$i c $major $i
+	chmod $mode /dev/${device}$i
+	echo "Created device /dev/${device}$i"
+done

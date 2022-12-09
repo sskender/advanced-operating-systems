@@ -1,0 +1,22 @@
+#!/bin/sh
+module="shofer"
+device_in="shofer_in"
+device_control="shofer_control"
+device_out="shofer_out"
+mode="666"
+
+/sbin/insmod ./$module.ko $* || exit 1
+
+major=$(awk "\$2==\"$module\" {print \$1}" /proc/devices)
+
+rm -f /dev/${device_in}
+mknod /dev/${device_in} c $major 0
+chmod $mode /dev/${device_in}
+
+rm -f /dev/${device_control}
+mknod /dev/${device_control} c $major 1
+chmod $mode /dev/${device_control}
+
+rm -f /dev/${device_out}
+mknod /dev/${device_out} c $major 2
+chmod $mode /dev/${device_out}

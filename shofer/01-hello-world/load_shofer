@@ -1,0 +1,4 @@
+#!/bin/sh
+module="shofer"
+
+/sbin/insmod ./$module.ko $* || exit 1

@@ -1,0 +1,11 @@
+#!/bin/sh
+module="shofer"
+device_in="shofer_in"
+device_control="shofer_control"
+device_out="shofer_out"
+
+/sbin/rmmod $module || exit 1
+
+rm -f /dev/${device_in}
+rm -f /dev/${device_control}
+rm -f /dev/${device_out}
