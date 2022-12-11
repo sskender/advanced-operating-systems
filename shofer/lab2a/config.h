@@ -17,8 +17,8 @@
 #define LICENSE		"Dual BSD/GPL"
 
 #define BUFFER_SIZE	64
-#define BUFFER_NUM	6
-#define DRIVER_NUM	6
+#define BUFFER_NUM	3
+#define DRIVER_NUM	3
 
 /* Circular buffer */
 struct buffer {
