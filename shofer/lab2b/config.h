@@ -18,7 +18,7 @@
 
 #define BUFFER_SIZE	64
 
-#define TIMER_PERIOD	5000 /* 5000 ms */
+#define TIMER_PERIOD	10000 /* 10000 ms */
 
 /* Circular buffer */
 struct buffer {
