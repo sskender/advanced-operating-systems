@@ -348,17 +348,16 @@ static long control_ioctl (struct file *filp, unsigned int cmd, unsigned long ar
 	for (i = 0; i < cmd; i++) {
 		if (kfifo_len(fifo_in) > 0 && kfifo_avail(fifo_out) > 0) {
 			got = kfifo_get(fifo_in, &c);
+			retval += got;
 			if (got > 0) {
 				got = kfifo_put(fifo_out, c);
 				if (got) {
-					LOG("control_ioctl moved '%c' from in to out", c);
+					LOG("control_ioctl moved '%c' from in to out, retval is %ld", c, retval);
 				} else {
 					klog(KERN_WARNING, "kfifo_put failed\n");
-					retval = got;
 				}
 			} else {
 				klog(KERN_WARNING, "kfifo_get failed\n");
-				retval = got;
 			}
 		} else {
 			LOG("control_ioctl empty buffer");
