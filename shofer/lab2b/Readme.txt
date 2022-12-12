@@ -38,7 +38,7 @@ $ cd test
 
 $ gcc -o shofer-ioctl ioctl.c
 
-$ $ echo -n "today is a good day" > /dev/shofer_in
+$ echo -n "today is a good day" > /dev/shofer_in
 
 $ ./shofer-ioctl /dev/shofer_control 10
 
