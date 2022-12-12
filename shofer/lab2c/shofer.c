@@ -29,6 +29,9 @@
 /* Buffer size */
 static int buffer_size = BUFFER_SIZE;
 
+/* Max active proc */
+static int max_active_proc = MAX_ACTIVE_PROC;
+
 /* Parameter buffer_size can be given at module load time */
 module_param(buffer_size, int, S_IRUGO);
 MODULE_PARM_DESC(buffer_size, "Buffer size in bytes, must be a power of 2");
@@ -179,6 +182,9 @@ static struct shofer_dev *shofer_create(dev_t dev_no,
 		shofer = NULL;
 	}
 
+	// set active process to zero
+	shofer->active_proc = 0;
+
 	return shofer;
 }
 static void shofer_delete(struct shofer_dev *shofer)
@@ -195,12 +201,31 @@ static int shofer_open(struct inode *inode, struct file *filp)
 	shofer = container_of(inode->i_cdev, struct shofer_dev, cdev);
 	filp->private_data = shofer; /* for other methods */
 
+	printk(KERN_NOTICE "Shofer max active proc allowed=%d\n", max_active_proc);
+	if (shofer->active_proc >= max_active_proc) {
+		printk(KERN_WARNING "Shofer maximum active open reached\n");
+		return -1;
+	}
+
+	printk(KERN_NOTICE "Shofer before open active-proc=%d\n", shofer->active_proc);
+	shofer->active_proc++;
+	printk(KERN_NOTICE "Shofer after open active-proc=%d\n", shofer->active_proc);
+
 	return 0;
 }
 
 /* Called when a process performs "close" operation */
 static int shofer_release(struct inode *inode, struct file *filp)
 {
+	struct shofer_dev *shofer; /* device information */
+
+	shofer = container_of(inode->i_cdev, struct shofer_dev, cdev);
+	filp->private_data = shofer; /* for other methods */
+
+	printk(KERN_NOTICE "Shofer before close active-proc=%d\n", shofer->active_proc);
+	shofer->active_proc--;
+	printk(KERN_NOTICE "Shofer after close active-proc=%d\n", shofer->active_proc);
+
 	return 0; /* nothing to do; could not set this function in fops */
 }
 
@@ -241,6 +266,11 @@ static ssize_t shofer_write(struct file *filp, const char __user *ubuf,
 	struct buffer *buffer = shofer->buffer;
 	struct kfifo *fifo = &buffer->fifo;
 	unsigned int copied;
+
+	if (count > buffer_size) {
+		printk(KERN_WARNING "shofer:message to long for buffer\n");
+		return -1;
+	}
 
 	if (mutex_lock_interruptible(&buffer->lock))
 		return -ERESTARTSYS;

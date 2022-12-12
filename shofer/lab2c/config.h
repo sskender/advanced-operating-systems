@@ -16,7 +16,8 @@
 #define AUTHOR		"Leonardo Jelenkovic"
 #define LICENSE		"Dual BSD/GPL"
 
-#define BUFFER_SIZE	64
+#define BUFFER_SIZE	32
+#define MAX_ACTIVE_PROC 3
 
 /* Circular buffer */
 struct buffer {
@@ -29,4 +30,5 @@ struct shofer_dev {
 	dev_t dev_no;		/* device number */
 	struct cdev cdev;	/* Char device structure */
 	struct buffer *buffer;	/* Pointer to buffer */
+	int active_proc;
 };
