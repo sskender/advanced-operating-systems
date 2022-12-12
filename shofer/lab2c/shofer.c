@@ -201,6 +201,9 @@ static int shofer_open(struct inode *inode, struct file *filp)
 	shofer = container_of(inode->i_cdev, struct shofer_dev, cdev);
 	filp->private_data = shofer; /* for other methods */
 
+	if ( (filp->f_flags & O_ACCMODE) != O_RDONLY && (filp->f_flags & O_ACCMODE) != O_WRONLY)
+		return -EPERM;
+
 	printk(KERN_NOTICE "Shofer max active proc allowed=%d\n", max_active_proc);
 	if (shofer->active_proc >= max_active_proc) {
 		printk(KERN_WARNING "Shofer maximum active open reached\n");
