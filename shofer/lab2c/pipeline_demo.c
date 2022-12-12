@@ -76,6 +76,7 @@ int main(int argc, char *argv[])
 					printf("Not enough space at the moment, please wait ...\n");
 				} else if (wsize == -1) {
 					printf("Message is to long for shofer buffer!\n");
+					close(fd);
 					exit(1);
 				}
 
