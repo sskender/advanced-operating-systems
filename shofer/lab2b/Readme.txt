@@ -1,45 +1,37 @@
-Example device driver
+LAB2B INSTRUCTIONS:
 
-Based mostly on instructions in book
-	"Linux Device Drivers, Third Edition" by
-	Jonathan Corbet, Alessandro Rubini, and Greg Kroah-Hartman
+1. Compile kernel module
+-------------------------
+	$ make
 
+2. Load module into kernel and make it ready for use
+-----------------------------------------------------
+	$ ./load_shofer
 
-Copyright (C) 2021 Leonardo Jelenkovic
+3. Store something in the buffer
+---------------------------------
+	$ echo -n "hello world" > /dev/shofer_in
 
-The source code in this file can be freely used, adapted,
-and redistributed in source or binary form.
-No warranty is attached.
+4. Read from buffer (only what is transfered with timer every 10 seconds)
+-------------------------------------------------------------------------
+	$ cat /dev/shofer_out
 
+5. Transfer using ioctl program
+--------------------------------
+	$ cd test
 
-INSTRUCTIONS:
+	$ gcc -o shofer-ioctl ioctl.c
 
+	$ echo -n "today is a good day" > /dev/shofer_in
 
-Compile and run:
+	$ ./shofer-ioctl /dev/shofer_control 10
 
-$ make
+	$ cat /dev/shofer_out  # today is a
 
-$ ./load_shofer
+6. Monitor kernel logs
+-----------------------
+    $ tail /var/log/kern.log
 
-
-Store something in the buffer:
-
-$ echo -n "hello world" > /dev/shofer_in
-
-
-Read from buffer (only what is transfered with timer every 10 seconds):
-
-$ cat /dev/shofer_out
-
-
-Transfer using ioctl program:
-
-$ cd test
-
-$ gcc -o shofer-ioctl ioctl.c
-
-$ echo -n "today is a good day" > /dev/shofer_in
-
-$ ./shofer-ioctl /dev/shofer_control 10
-
-$ cat /dev/shofer_out  # today is a
+7. Unload module
+-----------------
+    $ ./unload_shofer
