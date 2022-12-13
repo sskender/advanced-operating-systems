@@ -270,6 +270,7 @@ static ssize_t shofer_write(struct file *filp, const char __user *ubuf,
 	struct kfifo *fifo = &buffer->fifo;
 	unsigned int copied;
 
+	// validate message size
 	if (count > buffer_size) {
 		printk(KERN_WARNING "shofer:message to long for buffer\n");
 		return -1;

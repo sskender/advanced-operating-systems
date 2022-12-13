@@ -47,6 +47,13 @@ int main(int argc, char *argv[])
 				sleep(READ_SLEEP);
 			}
 
+			// exit on invalid mode
+			if (rsize == -1) {
+				printf("Error reading\n");
+				close(fd);
+				exit(1);
+			}
+
 			// print what is read and its size
 			printf("Successfully read from %s: size=%ld msg=%s\n", argv[1], rsize, buf);
 
@@ -75,7 +82,7 @@ int main(int argc, char *argv[])
 				if (wsize == 0) {
 					printf("Not enough space at the moment, please wait ...\n");
 				} else if (wsize == -1) {
-					printf("Message is to long for shofer buffer!\n");
+					printf("Error writing\n");
 					close(fd);
 					exit(1);
 				}
